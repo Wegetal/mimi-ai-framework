@@ -1,2 +1,2 @@
-# Mimi Ai sdk
+# Mimi Ai framework
 
