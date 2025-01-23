@@ -1,26 +1,48 @@
-import { UpdateOptions } from "mongodb";
-import { AgentData } from "../shared/types/agent/types";
-import { CollectionInterface, QueryOptions } from "../shared/types/db/types";
+import { VectorQueryOptions } from "@google-cloud/firestore";
+import { QueryOptions, VectorData } from "../shared/types/db/types";
+import {
+  VectorFilter,
+  VectorInput,
+  VectorOperation,
+  VectorSearchResult,
+  VectorStats,
+} from "../shared/types/db/vector";
 
-export interface Database {
-  createAgent(
-    data: Omit<AgentData, "id" | "createdAt" | "updatedAt">
-  ): Promise<AgentData>;
-  getAgent(id: string): Promise<AgentData | null>;
-  updateAgent(
+export interface VectorDatabase {
+  storeVector(data: VectorInput): Promise<void>;
+
+  getVector(
     id: string,
-    data: Partial<AgentData>,
-    options?: UpdateOptions
-  ): Promise<AgentData>;
-  //   deleteAgent(id: string): Promise<boolean>;
-  listAgents(
-    query?: Partial<AgentData>,
+    options?: { includeVector?: boolean }
+  ): Promise<VectorData | null>;
+
+  updateVector(
+    id: string,
+    data: Partial<Omit<VectorData, "id" | "createdAt" | "updatedAt">>,
+    options?: VectorOperation
+  ): Promise<VectorData>;
+
+  searchSimilarVectors(
+    queryVector: number[],
+    options?: VectorQueryOptions,
+    filter?: VectorFilter
+  ): Promise<VectorSearchResult[]>;
+
+  listVectors(
+    filter?: VectorFilter,
     options?: QueryOptions
-  ): Promise<AgentData[]>;
+  ): Promise<VectorData[]>;
 
-  //   collection<T>(name: string): CollectionInterface<T>;
+  deleteVector?(id: string): Promise<boolean>;
 
-  //   // Utility Operations
-  //   exists(collection: string, query: Record<string, any>): Promise<boolean>;
-  //   count(collection: string, query: Record<string, any>): Promise<number>;
+  countVectors(filter?: VectorFilter): Promise<number>;
+
+  getStats?(): Promise<VectorStats>;
+
+  // Batch operations
+  storeVectors?(
+    vectors: Array<Omit<VectorData, "id" | "createdAt" | "updatedAt">>
+  ): Promise<VectorData[]>;
+
+  deleteVectors?(ids: string[]): Promise<boolean>;
 }

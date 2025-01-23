@@ -1,28 +1,41 @@
-import { MongoClient, Collection, Db, ObjectId, UpdateOptions } from "mongodb";
-
+import {
+  MongoClient,
+  Collection,
+  Db,
+  ObjectId,
+  UpdateOptions,
+  OptionalId,
+} from "mongodb";
 import { z } from "zod";
-import { Database } from "../interface";
-import { AgentData } from "../../shared/types/agent/types";
-import { AgentSchema } from "../../shared/schemas/agent/schema";
-import { QueryOptions } from "../../shared/types/db/types";
+import { VectorDatabase } from "../interface";
 
-export class MongoDatabase implements Database {
+import { QueryOptions } from "../../shared/types/db/types";
+import {
+  VectorData,
+  VectorFilter,
+  VectorInput,
+  VectorOperation,
+  VectorQueryOptions,
+  VectorSearchResult,
+} from "../../shared/types/db/vector";
+import { VectorSchema } from "../../shared/schemas/db/schema";
+
+export class MongoVectorDatabase implements VectorDatabase {
   private client: MongoClient;
   private db: Db;
-  private agents: Collection<AgentData>;
+  private vectors: Collection<VectorData>;
 
   constructor(private readonly url: string, private readonly dbName: string) {
     this.client = new MongoClient(url);
     this.db = this.client.db(this.dbName);
-    this.agents = this.db.collection("agents");
+    this.vectors = this.db.collection("vectors");
   }
 
   async connect(): Promise<void> {
     try {
       await this.client.connect();
-
-      // Create indexes
-      // await this.setupIndexes();
+      // Create indexes for vector search
+      await this.setupIndexes();
     } catch (error) {
       throw this.handleError(error);
     }
@@ -32,42 +45,57 @@ export class MongoDatabase implements Database {
     await this.client.close();
   }
 
-  async createAgent(
-    data: Omit<AgentData, "id" | "createdAt" | "updatedAt">
-  ): Promise<AgentData> {
+  private async setupIndexes(): Promise<void> {
+    // Create a 2d index on the vector field for similarity search
+    await this.vectors.createIndex({ vector: "2d" });
+    // Create indexes on metadata fields that you frequently query
+    await this.vectors.createIndex({ "metadata.category": 1 });
+    await this.vectors.createIndex({ createdAt: 1 });
+    await this.vectors.createIndex({ updatedAt: 1 });
+  }
+
+  async storeVector(data: VectorInput): Promise<void> {
     try {
       const now = new Date();
-      const agentData: AgentData = {
+      const vectorData: VectorData = {
         id: new ObjectId().toString(),
-        ...data,
+        vector: data.vector,
+        metadata: data.metadata,
         createdAt: now,
         updatedAt: now,
       };
 
       // Validate with Zod
-      const validated = AgentSchema.parse(agentData);
+      const validated = VectorSchema.parse(vectorData);
 
-      await this.agents.insertOne(validated);
-      return validated;
+      //FIX
+      // const { id, ...insertData } = validated;
+      // await this.vectors.insertOne(insertData as Omit<VectorData, "id">);
+
+      // return validated;
     } catch (error) {
       throw this.handleError(error);
     }
   }
 
-  async getAgent(id: string): Promise<AgentData | null> {
-    try {
-      const agent = await this.agents.findOne({ id });
-      return agent;
-    } catch (error) {
-      throw this.handleError(error);
-    }
-  }
-
-  async updateAgent(
+  async getVector(
     id: string,
-    data: Partial<AgentData>,
-    options?: UpdateOptions
-  ): Promise<AgentData> {
+    options?: { includeVector?: boolean }
+  ): Promise<VectorData | null> {
+    try {
+      const projection = options?.includeVector ? {} : { vector: 0 };
+      const vector = await this.vectors.findOne({ id }, { projection });
+      return vector;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async updateVector(
+    id: string,
+    data: Partial<Omit<VectorData, "id" | "createdAt" | "updatedAt">>,
+    options?: VectorOperation
+  ): Promise<VectorData> {
     try {
       const now = new Date();
       const updateData = {
@@ -77,37 +105,61 @@ export class MongoDatabase implements Database {
         },
       };
 
-      const result = await this.agents.findOneAndUpdate({ id }, updateData, {
+      const result = await this.vectors.findOneAndUpdate({ id }, updateData, {
         upsert: options?.upsert,
         returnDocument: "after",
       });
 
-      // if (!result.value) {
-      //   throw new Error("Agent not found");
-      // }
+      if (!result) {
+        throw new Error("Vector not found");
+      }
 
-      return;
-      // return result.value;
+      return result;
     } catch (error) {
       throw this.handleError(error);
     }
   }
 
-  async deleteAgent(id: string): Promise<boolean> {
+  async searchSimilarVectors(
+    queryVector: number[],
+    options?: VectorQueryOptions,
+    filter?: VectorFilter
+  ): Promise<VectorSearchResult[]> {
     try {
-      const result = await this.agents.deleteOne({ id });
-      return result.deletedCount > 0;
+      const query: any = {
+        $and: [
+          { vector: { $near: queryVector } },
+          filter ? this.buildFilter(filter) : {},
+        ],
+      };
+
+      let cursor = this.vectors.find(query);
+
+      if (options?.limit) {
+        cursor = cursor.limit(options.limit);
+      }
+
+      const results = await cursor.toArray();
+
+      return results.map(
+        (doc): VectorSearchResult => ({
+          id: doc.id,
+          score: this.calculateSimilarity(queryVector, doc.vector),
+          vector: options?.includeVector ? doc.vector : undefined,
+          metadata: options?.includeMetadata ? doc.metadata : undefined,
+        })
+      );
     } catch (error) {
       throw this.handleError(error);
     }
   }
 
-  async listAgents(
-    query?: Partial<AgentData>,
+  async listVectors(
+    filter?: VectorFilter,
     options?: QueryOptions
-  ): Promise<AgentData[]> {
+  ): Promise<VectorData[]> {
     try {
-      let cursor = this.agents.find(query || {});
+      let cursor = this.vectors.find(filter ? this.buildFilter(filter) : {});
 
       if (options?.sort) {
         cursor = cursor.sort(options.sort);
@@ -125,6 +177,69 @@ export class MongoDatabase implements Database {
     } catch (error) {
       throw this.handleError(error);
     }
+  }
+
+  async deleteVector(id: string): Promise<boolean> {
+    try {
+      const result = await this.vectors.deleteOne({ id });
+      return result.deletedCount > 0;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async countVectors(filter?: VectorFilter): Promise<number> {
+    try {
+      return await this.vectors.countDocuments(
+        filter ? this.buildFilter(filter) : {}
+      );
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  private buildFilter(filter: VectorFilter): any {
+    const mongoFilter: any = {};
+
+    if (filter.metadata) {
+      Object.entries(filter.metadata).forEach(([key, value]) => {
+        mongoFilter[`metadata.${key}`] = value;
+      });
+    }
+
+    if (filter.createdAt) {
+      mongoFilter.createdAt = {};
+      if (filter.createdAt.$gt)
+        mongoFilter.createdAt.$gt = filter.createdAt.$gt;
+      if (filter.createdAt.$lt)
+        mongoFilter.createdAt.$lt = filter.createdAt.$lt;
+    }
+
+    if (filter.updatedAt) {
+      mongoFilter.updatedAt = {};
+      if (filter.updatedAt.$gt)
+        mongoFilter.updatedAt.$gt = filter.updatedAt.$gt;
+      if (filter.updatedAt.$lt)
+        mongoFilter.updatedAt.$lt = filter.updatedAt.$lt;
+    }
+
+    return mongoFilter;
+  }
+
+  private calculateSimilarity(a: number[], b: number[]): number {
+    // Implement your similarity measure here (e.g., cosine similarity)
+    // This is a placeholder implementation
+    let dotProduct = 0;
+    let magnitudeA = 0;
+    let magnitudeB = 0;
+
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      magnitudeA += a[i] * a[i];
+      magnitudeB += b[i] * b[i];
+    }
+
+    return dotProduct / (Math.sqrt(magnitudeA) * Math.sqrt(magnitudeB));
   }
 
   private handleError(error: any): Error {

@@ -61,3 +61,12 @@ export interface Migration {
   version: string;
   description: string;
 }
+
+// In your types file (e.g., shared/types/vector/types.ts)
+export interface VectorData {
+  id: string;
+  vector: number[];
+  metadata: Record<string, unknown>;
+  createdAt: Date;
+  updatedAt: Date;
+}

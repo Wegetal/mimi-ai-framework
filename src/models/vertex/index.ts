@@ -6,7 +6,7 @@ import {
   CompletionResponse,
   StreamResponse,
   Message,
-} from "../types";
+} from "../interface";
 import { LLMInterface } from "../llm";
 
 interface VertexConfig extends LLMConfig {
