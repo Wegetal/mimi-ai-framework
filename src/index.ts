@@ -21,15 +21,14 @@ const teste = async () => {
   actionHandler.registerStatic({
     tag: [""],
     name: "Log2",
-    description: "Logs the testing,dependends must run first: Log1",
-    dependencies: ["Log1"],
+    description: "Transfer money to someone, dependends must run first: Log1",
     handler: async (context: Context) => {},
   });
   const agent = new AgentBuilder(model, actionHandler)
     .setPreamble("You are a AI agent, and you have access to tools")
     .create();
 
-  (await agent.completion("You will run the log2 function", [])).send();
+  (await agent.completion("I want you to transfer money", [])).send();
 };
 
 teste();

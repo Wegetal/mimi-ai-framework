@@ -1,5 +1,9 @@
 import { Context } from "../shared/context";
-import { ActionDefinition, ActionFunction } from "../shared/types/action";
+import {
+  ActionDefinition,
+  ActionFunction,
+  ActionWithEmbedding,
+} from "../shared/types/action";
 import { BaseHandler } from "../shared/types/action/interface";
 
 export class ActionHandler implements BaseHandler {
@@ -7,7 +11,7 @@ export class ActionHandler implements BaseHandler {
   registry: Map<string, ActionDefinition>;
 
   // Dynamic registry: Actions generated dynamically based on context
-  dynamicRegistry: Map<string, (context: Context) => Promise<ActionFunction>>;
+  dynamicRegistry: Map<string, ActionWithEmbedding>;
 
   constructor() {
     this.registry = new Map();
@@ -32,14 +36,11 @@ export class ActionHandler implements BaseHandler {
    * @param name - Name of the action.
    * @param actionFnGenerator - Function that returns the action based on context.
    */
-  registerDynamic(
-    name: string,
-    actionFnGenerator: (context: Context) => Promise<ActionFunction>
-  ): void {
-    if (this.dynamicRegistry.has(name)) {
-      throw new Error(`Dynamic action "${name}" is already registered.`);
+  registerDynamic(action: ActionWithEmbedding): void {
+    if (this.dynamicRegistry.has(action.name)) {
+      throw new Error(`Dynamic action "${action.name}" is already registered.`);
     }
-    this.dynamicRegistry.set(name, actionFnGenerator);
+    this.dynamicRegistry.set(action.name, action);
   }
 
   /**
@@ -48,7 +49,7 @@ export class ActionHandler implements BaseHandler {
    * @param context - The context object providing necessary data.
    * @returns The result of the action execution.
    */
-  async execute<T>(name: string, context: Context): Promise<T> {
+  execute<T>(name: string, context: Context): Promise<T> {
     let actionFn: ActionFunction | undefined;
 
     // First, check if it's a static action
@@ -58,8 +59,8 @@ export class ActionHandler implements BaseHandler {
 
     // If not static, check if it's a dynamic action
     if (!actionFn && this.dynamicRegistry.has(name)) {
-      const dynamicActionFnGenerator = this.dynamicRegistry.get(name);
-      actionFn = await dynamicActionFnGenerator!(context); // Await the dynamic action generator
+      const dynamicAction = this.dynamicRegistry.get(name);
+      actionFn = dynamicAction.handler; // Await the dynamic action generator
     }
 
     // If action is found, execute it
@@ -67,7 +68,7 @@ export class ActionHandler implements BaseHandler {
       throw new Error(`Action "${name}" not found.`);
     }
 
-    return await actionFn(context);
+    return actionFn(context);
   }
 
   /**

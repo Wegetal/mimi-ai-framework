@@ -16,7 +16,6 @@ export interface ActionDefinition {
   handler: ActionFunction; // The function that executes the action.
 }
 
-export interface ActionWithEmbedding {
-  action: ActionDefinition;
+export interface ActionWithEmbedding extends ActionDefinition {
   embedding: Embedding;
 }
