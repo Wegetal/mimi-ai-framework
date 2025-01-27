@@ -1,179 +1,103 @@
-import { VertexAI } from "@google-cloud/vertexai";
+import { GenerateContentRequest, VertexAI } from "@google-cloud/vertexai";
 import {
-  LLMConfig,
   CompletionRequest,
-  ChatRequest,
   CompletionResponse,
-  StreamResponse,
   Message,
-} from "../interface";
-import { LLMInterface } from "../llm";
+  ModelChoice,
+  ModelInterface,
+} from "../../shared/types/model";
+import { ActionDefinition } from "../../shared/types/action";
 
-interface VertexConfig extends LLMConfig {
+interface VertexConfig {
   project?: string;
   location?: string;
+  model: string;
 }
 
-export class VertexAIProvider extends LLMInterface {
+export class VertexAIProvider extends ModelInterface {
   private client: VertexAI;
   private model: any;
 
   constructor(config: VertexConfig) {
-    super(config);
+    super();
     this.client = new VertexAI({
+      googleAuthOptions: {
+        projectId: config.project,
+        keyFile: "./teste.json",
+        apiKey: "",
+      },
       project: config.project || process.env.GOOGLE_CLOUD_PROJECT,
       location: config.location || "us-central1",
     });
 
     this.model = this.client.preview.getGenerativeModel({
-      model: config.modelName,
+      model: "gemini-1.0-pro",
     });
   }
 
-  async complete(request: CompletionRequest): Promise<CompletionResponse> {
-    try {
-      const generationConfig = {
-        temperature: this.config.temperature,
-        maxOutputTokens: this.config.maxTokens,
-        topP: this.config.topP,
-      };
-
-      const result = await this.model.generateContent({
-        contents: [{ text: request.prompt }],
-        generationConfig,
-      });
-
-      const response = await result.response;
-      const content = response.candidates[0].content.parts[0].text;
-
-      return {
-        content,
-        usage: {
-          promptTokens: 0,
-          completionTokens: 0,
-          totalTokens: 0,
-        },
-        model: this.config.modelName,
-      };
-    } catch (error) {
-      throw this.handleError(error);
-    }
+  get modelName(): string {
+    return this.model.model;
   }
 
-  async streamComplete(
-    request: CompletionRequest,
-    callback: (response: StreamResponse) => void
-  ): Promise<void> {
-    try {
-      const generationConfig = {
-        temperature: this.config.temperature,
-        maxOutputTokens: this.config.maxTokens,
-        topP: this.config.topP,
-      };
+  async completion(request: CompletionRequest): Promise<CompletionResponse> {
+    const fullHistory = this.buildFullHistory(request);
 
-      const result = await this.model.generateContentStream({
-        contents: [{ text: request.prompt }],
-        generationConfig,
-      });
+    const vertexRequest: GenerateContentRequest = {
+      contents: fullHistory,
+      generationConfig: {
+        temperature: request.temperature,
+        maxOutputTokens: request.maxTokens,
+      },
+      systemInstruction: request.preamble,
+    };
 
-      let accumulatedContent = "";
-      for await (const chunk of result.stream) {
-        if (chunk.candidates?.[0]?.content?.parts?.[0]?.text) {
-          accumulatedContent += chunk.candidates[0].content.parts[0].text;
-          callback({
-            content: accumulatedContent,
-            isComplete: false,
-          });
-        }
-      }
-
-      callback({
-        content: accumulatedContent,
-        isComplete: true,
-      });
-    } catch (error) {
-      throw this.handleError(error);
+    if (request.actions && request.actions.length > 0) {
+      console.log(request.actions);
+      vertexRequest.tools = [{ functionDeclarations: request.actions }];
     }
+
+    if (request.additionalParams) {
+      Object.assign(vertexRequest, request.additionalParams);
+    }
+
+    const result = await this.model.generateContent(vertexRequest);
+    const response = await result.response;
+    console.log(response.candidates[0].content.parts[0]);
+    console.log(
+      `Vertex AI completion response: ${JSON.stringify(response.candidates[0])}`
+    );
+
+    return this.parseCompletionResponse(response);
   }
 
-  async chat(request: ChatRequest): Promise<CompletionResponse> {
-    try {
-      const generationConfig = {
-        temperature: this.config.temperature,
-        maxOutputTokens: this.config.maxTokens,
-        topP: this.config.topP,
-      };
+  private buildFullHistory(
+    request: CompletionRequest
+  ): Array<{ role: string; parts: { text: string }[] }> {
+    const fullHistory: Array<{ role: string; parts: { text: string }[] }> = [];
 
-      const contents = this.convertMessages(request.messages);
-      const result = await this.model.generateContent({
-        contents,
-        generationConfig,
-      });
+    fullHistory.push(...this.convertMessages(request.chatHistory));
 
-      const response = await result.response;
-      const content = response.candidates[0].content.parts[0].text;
+    const promptWithContext = this.buildPromptWithContext(request);
+    fullHistory.push({ role: "user", parts: [{ text: promptWithContext }] });
 
-      return {
-        content,
-        usage: {
-          promptTokens: 0,
-          completionTokens: 0,
-          totalTokens: 0,
-        },
-        model: this.config.modelName,
-      };
-    } catch (error) {
-      throw this.handleError(error);
-    }
+    return fullHistory;
   }
 
-  async streamChat(
-    request: ChatRequest,
-    callback: (response: StreamResponse) => void
-  ): Promise<void> {
-    try {
-      const generationConfig = {
-        temperature: this.config.temperature,
-        maxOutputTokens: this.config.maxTokens,
-        topP: this.config.topP,
-      };
-
-      const contents = this.convertMessages(request.messages);
-      const result = await this.model.generateContentStream({
-        contents,
-        generationConfig,
-      });
-
-      let accumulatedContent = "";
-      for await (const chunk of result.stream) {
-        if (chunk.candidates?.[0]?.content?.parts?.[0]?.text) {
-          accumulatedContent += chunk.candidates[0].content.parts[0].text;
-          callback({
-            content: accumulatedContent,
-            isComplete: false,
-          });
-        }
-      }
-
-      callback({
-        content: accumulatedContent,
-        isComplete: true,
-      });
-    } catch (error) {
-      throw this.handleError(error);
+  private buildPromptWithContext(request: CompletionRequest): string {
+    let prompt = request.prompt;
+    if (request.documents && request.documents.length > 0) {
+      const context = request.documents.map((doc) => doc.text).join("\n\n");
+      prompt = `Context:\n${context}\n\n${prompt}`;
     }
-  }
-
-  getTokenCount(text: string): number {
-    return Math.ceil(text.length / 4);
+    return prompt;
   }
 
   private convertMessages(
     messages: Message[]
-  ): Array<{ role: string; text: string }> {
+  ): Array<{ role: string; parts: { text: string }[] }> {
     return messages.map((msg) => ({
       role: this.mapRole(msg.role),
-      text: msg.content,
+      parts: [{ text: msg.content }],
     }));
   }
 
@@ -189,9 +113,36 @@ export class VertexAIProvider extends LLMInterface {
     }
   }
 
-  private handleError(error: any): Error {
-    const message = error.message || "Unknown error";
-    const details = error.details || "";
-    return new Error(`Vertex AI error: ${message} ${details}`);
+  private getActions(action: ActionDefinition): any {
+    return {
+      functionDeclarations: [
+        {
+          name: action.name,
+          description: action.description,
+          parameters: action.parameters,
+        },
+      ],
+    };
+  }
+
+  private parseCompletionResponse(response: any): CompletionResponse {
+    const candidate = response.candidates[0];
+    if (candidate.content.parts[0].functionCall) {
+      const functionCall = candidate.content.parts[0].functionCall;
+      return {
+        choice: ModelChoice.Action,
+        actionName: functionCall.name,
+        args: functionCall.args,
+        usage: null, // Vertex AI doesn't provide token usage
+        rawResponse: response,
+      };
+    } else {
+      return {
+        choice: ModelChoice.Message,
+        message: candidate.content.parts[0].text || "",
+        usage: null, // Vertex AI doesn't provide token usage
+        rawResponse: response,
+      };
+    }
   }
 }

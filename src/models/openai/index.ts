@@ -2,13 +2,10 @@ import OpenAI from "openai";
 import {
   CompletionRequest,
   CompletionResponse,
-  Message,
   ModelChoice,
   ModelInterface,
 } from "../../shared/types/model";
-import { ActionDefinition } from "../../shared/types/action";
 import { ChatCompletionMessageParam } from "openai/resources";
-import { CompletionRequestBuilder } from "../builder";
 
 export class OpenAIProvider extends ModelInterface {
   private client: OpenAI;
@@ -22,10 +19,6 @@ export class OpenAIProvider extends ModelInterface {
     this.model = config.model;
   }
 
-  completionRequest(prompt: string): CompletionRequestBuilder {
-    return new CompletionRequestBuilder(this as ModelInterface, prompt);
-  }
-
   async completion(request: CompletionRequest): Promise<CompletionResponse> {
     const fullHistory = this.buildFullHistory(request);
 
@@ -35,7 +28,7 @@ export class OpenAIProvider extends ModelInterface {
       temperature: request.temperature,
     };
     if (request.actions && request.actions.length > 0) {
-      openAIRequest.functions = request.actions.map(this.getActions);
+      openAIRequest.functions = request.actions;
       openAIRequest.function_call = "auto";
     }
 
@@ -79,18 +72,9 @@ export class OpenAIProvider extends ModelInterface {
     return prompt;
   }
 
-  private getActions(action: ActionDefinition): any {
-    return {
-      name: action.name,
-      description: action.description,
-      parameters: action.parameters,
-      dependencies: action.dependencies,
-      tag: action.tag,
-    };
-  }
-
   private parseCompletionResponse(response: any): CompletionResponse {
     const choice = response.choices[0];
+    console.log(response.choices);
     if (choice.message.function_call) {
       return {
         choice: ModelChoice.Action,

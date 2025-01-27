@@ -1,4 +1,4 @@
-import { ActionDefinition } from "../action";
+import { ActionDefinition, StoredAction } from "../action";
 
 // Type definitions
 export interface Message {
@@ -17,7 +17,7 @@ export interface CompletionRequest {
   preamble?: string;
   chatHistory: Message[];
   documents: Document[];
-  actions: ActionDefinition[];
+  actions: StoredAction[];
   temperature?: number;
   maxTokens?: number;
   additionalParams?: any;
@@ -62,31 +62,11 @@ export interface Chat {
 }
 
 export interface Completion {
-  completion(
-    prompt: string,
-    chatHistory: Message[]
-  ): Promise<CompletionRequestBuilderType>;
+  completion(prompt: string, chatHistory: Message[]): Promise<any>;
 }
 
 export abstract class ModelInterface {
   abstract completion(
     request: CompletionRequest
   ): Promise<CompletionResponse<any>>;
-  abstract completionRequest(prompt: string): CompletionRequestBuilderType;
-  abstract completionRequest(prompt: string): CompletionRequestBuilderType;
-}
-
-// CompletionRequestBuilder interface
-export interface CompletionRequestBuilderType {
-  setPreamble(preamble: string): this;
-  addMessage(message: Message): this;
-  addMessages(messages: Message[]): this;
-  addDocument(document: Document): this;
-  addDocuments(documents: Document[]): this;
-  addAction(action: ActionDefinition): this;
-  addActions(actions: ActionDefinition[]): this;
-  setAdditionalParams(additionalParams: any): this;
-  setTemperature(temperature: number): this;
-  create(): CompletionRequest;
-  send(): Promise<CompletionResponse<any>>;
 }

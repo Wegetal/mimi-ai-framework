@@ -1,21 +1,13 @@
 import { Context } from "../shared/context";
-import {
-  ActionDefinition,
-  ActionFunction,
-  ActionWithEmbedding,
-} from "../shared/types/action";
-import { BaseHandler } from "../shared/types/action/interface";
+import { ActionDefinition, StoredAction } from "../shared/types/action";
+import { BaseActionHandler } from "../shared/types/action/interface";
 
-export class ActionHandler implements BaseHandler {
+export class ActionHandler implements BaseActionHandler {
   // Registry of static actions, mapped by their unique name
-  registry: Map<string, ActionDefinition>;
-
-  // Dynamic registry: Actions generated dynamically based on context
-  dynamicRegistry: Map<string, ActionWithEmbedding>;
+  registry: Map<string, StoredAction>;
 
   constructor() {
     this.registry = new Map();
-    this.dynamicRegistry = new Map();
   }
 
   /**
@@ -23,24 +15,22 @@ export class ActionHandler implements BaseHandler {
    * @param name - Name of the action.
    * @param actionFn - The action function to register.
    */
-  registerStatic(action: ActionDefinition): void {
+  register(action: ActionDefinition): void {
     if (this.registry.has(action.name)) {
       throw new Error(`Action "${name}" is already registered.`);
     }
-    this.registry.set(action.name, action);
-  }
+    const builtAction: StoredAction = {
+      name: action.name,
+      description: `## Tags: ${action.tags.join(", ")}## Description: ${
+        action.description
+      } ## Parameters: ${action.parameters} ## Depends on: ${
+        action?.dependencies?.join(", ") ?? "No dependency"
+      } to Run First ##`,
+      handler: action.handler,
+      parameters: action.parameters,
+    };
 
-  /**
-   * Registers a dynamic action.
-   * The action will be generated based on the current context.
-   * @param name - Name of the action.
-   * @param actionFnGenerator - Function that returns the action based on context.
-   */
-  registerDynamic(action: ActionWithEmbedding): void {
-    if (this.dynamicRegistry.has(action.name)) {
-      throw new Error(`Dynamic action "${action.name}" is already registered.`);
-    }
-    this.dynamicRegistry.set(action.name, action);
+    this.registry.set(action.name, builtAction);
   }
 
   /**
@@ -49,32 +39,25 @@ export class ActionHandler implements BaseHandler {
    * @param context - The context object providing necessary data.
    * @returns The result of the action execution.
    */
-  execute<T>(name: string, context: Context): Promise<T> {
-    let actionFn: ActionFunction | undefined;
-
-    // First, check if it's a static action
-    if (this.registry.has(name)) {
-      actionFn = this.registry.get(name).handler;
-    }
-
-    // If not static, check if it's a dynamic action
-    if (!actionFn && this.dynamicRegistry.has(name)) {
-      const dynamicAction = this.dynamicRegistry.get(name);
-      actionFn = dynamicAction.handler; // Await the dynamic action generator
-    }
+  execute<T>(
+    name: string,
+    context: Context,
+    args: Record<string, any>
+  ): Promise<T> {
+    const actionFn = this.registry.get(name).handler;
 
     // If action is found, execute it
     if (!actionFn) {
       throw new Error(`Action "${name}" not found.`);
     }
 
-    return actionFn(context);
+    return actionFn(context, args);
   }
 
   /**
    * Returns the list of all registered actions (both static and dynamic).
    */
-  getRegistered(): ActionDefinition[] {
+  getRegistered(): StoredAction[] {
     return Array.from(this.registry.values());
   }
 }

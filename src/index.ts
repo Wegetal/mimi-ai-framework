@@ -3,32 +3,41 @@ import { ActionHandler } from "./action/handler";
 import { AgentBuilder } from "./agent/builder";
 import { OpenAIProvider } from "./models/openai";
 import { Context } from "./shared/context";
+import { Agent } from "./agent/agent";
+import { DeepSeekProvider } from "./models/deepseek";
+import { AnthropicProvider } from "./models/anthropic";
 
 const teste = async () => {
-  const model = new OpenAIProvider({
-    model: "gpt-4o-mini",
+  const model = new AnthropicProvider({
     apiKey: "",
   });
   const actionHandler = new ActionHandler();
-  actionHandler.registerStatic({
-    tag: [""],
+  const initialContext = new Context();
+  actionHandler.register({
+    tags: [""],
     name: "Log1",
-    description: "Logs the testing",
+    description: "Logs the balance",
     handler: async (context: Context) => {
-      axios.post("localhost:3000");
+      console.log("Teste");
     },
   });
-  actionHandler.registerStatic({
-    tag: [""],
+  actionHandler.register({
+    tags: [""],
     name: "Log2",
-    description: "Transfer money to someone, dependends must run first: Log1",
-    handler: async (context: Context) => {},
+    description: "Transfer 200 usd to Robert",
+    dependencies: ["Log1"],
+    handler: async (context: Context) => {
+      console.log("Teste1");
+    },
   });
-  const agent = new AgentBuilder(model, actionHandler)
-    .setPreamble("You are a AI agent, and you have access to tools")
-    .create();
+  const agent = new Agent(
+    model,
+    "You are a AI agent, and you have access to tools",
+    initialContext,
+    actionHandler
+  );
 
-  (await agent.completion("I want you to transfer money", [])).send();
+  await agent.chat("I want you to transfer 200 usd to Robert", []);
 };
 
 teste();

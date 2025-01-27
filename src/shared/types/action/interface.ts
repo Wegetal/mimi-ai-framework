@@ -1,11 +1,13 @@
 import { Context } from "../../context";
-import { ActionDefinition, ActionFunction, ActionWithEmbedding } from ".";
+import { ActionDefinition, StoredAction } from ".";
 
-export interface BaseHandler {
-  registry: Map<string, ActionDefinition>;
-  dynamicRegistry: Map<string, ActionWithEmbedding>;
-  registerStatic<T>(action: ActionDefinition): void;
-  registerDynamic<T>(action: ActionWithEmbedding): void;
-  execute<T>(name: string, agentContext: Context): Promise<T>;
-  getRegistered(): ActionDefinition[];
+export interface BaseActionHandler {
+  registry: Map<string, StoredAction>;
+  register(action: ActionDefinition): void;
+  execute<T>(
+    name: string,
+    agentContext: Context,
+    args: Record<string, any>
+  ): Promise<T>;
+  getRegistered(): StoredAction[];
 }
